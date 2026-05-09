@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from scipy.spatial.distance import cdist
 import pandas as pd
 import time
+from itertools import combinations
 
 class GaussianCTS:
     def __init__(self, n_arms, budget, prior_var=1.0, noise_var=1.0):
@@ -186,7 +187,7 @@ class CombinatorialUCB:
 #         for t in range(N):
 #             selected_actions = cts.step(f_samples[t,:])
 #         return selected_actions  
-    
+
 class GPfunctions_noise:
     def __init__(self, K, length_scale=None, IfStationary=True):
         self.K=K
@@ -577,3 +578,110 @@ class GPfunctions:
         # self.sh_steps=total_pulls
         # print("total pulls of super arms:",total_pulls)
         return arm_seq, pull_seq
+
+
+# ---------------------------------------------------------------------------
+# Online bandit evaluation
+# ---------------------------------------------------------------------------
+
+def online_regret(f, policy, T, action_set=None):
+    """Run online bandit for T rounds and return cumulative regret.
+
+    f: (N,) reward array for all actions
+    policy: object with select_arm() -> int and update(arm, reward)
+    action_set: if given, policy arm i maps to action_set[i] (subset mode)
+    """
+    optimal = np.max(f)
+    regret = np.zeros(T)
+    for t in range(T):
+        arm = policy.select_arm()
+        actual = action_set[arm] if action_set is not None else arm
+        reward = f[actual]
+        policy.update(arm, reward)
+        regret[t] = optimal - reward
+    return np.cumsum(regret)
+
+
+# ---------------------------------------------------------------------------
+# Baseline: Zooming algorithm
+# ---------------------------------------------------------------------------
+
+class ZoomingBandit:
+    """Zooming algorithm for Lipschitz bandits on a finite metric space.
+
+    Slivkins (2011): Multi-armed bandits on implicit metric spaces.
+    Adaptively activates arms whose metric ball is not covered by any
+    already-active arm, then plays UCB over the active set.
+
+    action_distances: (N, N) precomputed pairwise distance matrix.
+    nu: radius scaling constant (tune based on Lipschitz constant).
+    """
+    def __init__(self, n_arms, action_distances, nu=1.0):
+        self.n = n_arms
+        self.D = action_distances
+        self.nu = nu
+        self.means = np.zeros(n_arms)
+        self.counts = np.zeros(n_arms, dtype=int)
+        self.t = 0
+        self.active = np.zeros(n_arms, dtype=bool)
+        self.active[n_arms // 2] = True    # seed with center arm
+
+    def _radii(self):
+        r = np.full(self.n, np.inf)
+        pulled = self.counts > 0
+        r[pulled] = self.nu * np.sqrt(np.log(self.t + 2) / self.counts[pulled])
+        return r
+
+    def select_arm(self):
+        r = self._radii()
+        active_idx = np.where(self.active)[0]
+        inactive_idx = np.where(~self.active)[0]
+        if inactive_idx.size > 0:
+            # Activate arm i if no active arm j covers it (D[i,j] <= r[j])
+            covered = np.any(
+                self.D[np.ix_(inactive_idx, active_idx)] <= r[active_idx], axis=1
+            )
+            self.active[inactive_idx[~covered]] = True
+            active_idx = np.where(self.active)[0]
+        ucb = self.means[active_idx] + 2.0 * r[active_idx]
+        return int(active_idx[np.argmax(ucb)])
+
+    def update(self, arm, reward):
+        self.counts[arm] += 1
+        self.means[arm] += (reward - self.means[arm]) / self.counts[arm]
+        self.t += 1
+
+
+# ---------------------------------------------------------------------------
+# Baseline: Meta-Thompson Sampling
+# ---------------------------------------------------------------------------
+
+class MetaTS:
+    """Meta-Thompson Sampling with empirical Bayes prior (Kveton et al. 2021).
+
+    Estimates per-arm prior mean and variance from K meta-training tasks,
+    then runs Thompson Sampling on the full action space for a new task.
+
+    meta_rewards: (K, N) array of full reward vectors from K training tasks.
+    known_variance: per-round observation noise variance.
+    """
+    def __init__(self, n_arms, meta_rewards, known_variance=1.0):
+        self.n = n_arms
+        self.sigma2 = known_variance
+        self.mu = meta_rewards.mean(axis=0)            # (N,) empirical prior mean
+        prior_var = meta_rewards.var(axis=0) + 1e-6    # (N,) empirical prior variance
+        self.lam = 1.0 / prior_var                     # prior precision
+        self.post_mu = self.mu.copy()
+        self.post_lam = self.lam.copy()
+
+    def select_arm(self):
+        std = np.sqrt(self.sigma2 / self.post_lam)
+        return int(np.argmax(np.random.normal(self.post_mu, std)))
+
+    def update(self, arm, reward):
+        obs_prec = 1.0 / self.sigma2
+        new_lam = self.post_lam[arm] + obs_prec
+        self.post_mu[arm] = (
+            self.post_lam[arm] * self.post_mu[arm] + obs_prec * reward
+        ) / new_lam
+        self.post_lam[arm] = new_lam
