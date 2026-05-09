@@ -584,22 +584,26 @@ class GPfunctions:
 # Online bandit evaluation
 # ---------------------------------------------------------------------------
 
-def online_regret(f, policy, T, action_set=None):
+def online_regret(f, policy, T, action_set=None, return_time=False):
     """Run online bandit for T rounds and return cumulative regret.
 
     f: (N,) reward array for all actions
     policy: object with select_arm() -> int and update(arm, reward)
     action_set: if given, policy arm i maps to action_set[i] (subset mode)
+    return_time: if True, also return wall-clock seconds for the T rounds
     """
     optimal = np.max(f)
     regret = np.zeros(T)
+    t0 = time.perf_counter()
     for t in range(T):
         arm = policy.select_arm()
         actual = action_set[arm] if action_set is not None else arm
         reward = f[actual]
         policy.update(arm, reward)
         regret[t] = optimal - reward
-    return np.cumsum(regret)
+    elapsed = time.perf_counter() - t0
+    cum = np.cumsum(regret)
+    return (cum, elapsed) if return_time else cum
 
 
 # ---------------------------------------------------------------------------
