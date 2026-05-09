@@ -230,11 +230,6 @@ class GPfunctions_noise:
     #     return subset
 
     def argmax(self, f_samples, N):
-        # cts = GaussianCTS(self.num_points, budget=1, prior_var=1.0, noise_var=self.noise_var)
-        # for t in range(N-1):  # only update internal state
-        #     _ = cts.step(f_samples[0,:])
-        # selected_actions = cts.step(f_samples[0,:])  # final result
-        # return selected_actions
     
         bandit = GaussianTS(self.num_points, known_variance=1)
         rewards = []
@@ -247,14 +242,15 @@ class GPfunctions_noise:
         # print("Estimated means:", bandit.prior_mean)
         return bandit.select_arm()
 
-    def algorithm(self):
+    def algorithm(self,num_rounds=None):
         subset = set()
         samplesize=0
         while len(subset) < self.K:
             f_samples = self.samples(size=self.K - len(subset))
             for f in f_samples:
-                max_indices = self.argmax(f[np.newaxis, :], N=300)
-                samplesize+=300
+                N=num_rounds if num_rounds is not None else 300
+                max_indices = self.argmax(f[np.newaxis, :], N=N)
+                samplesize+=N
                 # subset.update(max_indices)
                 subset.add(max_indices)
         self.epsilon_samplesize = samplesize
