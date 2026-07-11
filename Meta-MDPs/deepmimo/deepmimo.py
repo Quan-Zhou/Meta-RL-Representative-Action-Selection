@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
-import DeepMIMO
+import DeepMIMOv3 as DeepMIMO  # pip package name is "DeepMIMO", but the importable module is "DeepMIMOv3"
 
 # ----------------------------------------
 # Step 1: 辅助函数 - 生成标准 DFT 码本
@@ -33,7 +33,7 @@ class DeepMIMOBeamSelectionDataset(Dataset):
         # 1. 提取原始信道矩阵，假设形状为: (用户数, UE天线数, BS天线数, 子载波数量)
         # 针对波束选择，通常对子载波取平均，或仅选择中心子载波。这里对子载波降维
         # 假设用户为单天线(UE=1)，降维后形状: (用户数, BS天线数)
-        channels = np.mean(bs_data['channel'], axis=-1).squeeze() 
+        channels = np.mean(bs_data['user']['channel'], axis=-1).squeeze()
         num_users, num_antennas = channels.shape
         
         # 2. 生成码本并计算每个用户的最佳波束标签
@@ -73,20 +73,25 @@ class DeepMIMOBeamSelectionDataset(Dataset):
 # Step 3: 运行管道演示
 # ----------------------------------------
 if __name__ == "__main__":
-    # 配置并生成 DeepMIMO 原始数据
-    parameters = {
-        'scenario': 'O1_28_NY',
-        'num_antennas_BS': [64, 1, 1], # 64天线线性阵列
-        'num_antennas_UE': [1, 1, 1],  # 单天线用户
-        'ant_spacing_BS': 0.5,
-        'ant_spacing_UE': 0.5,
-        'bandwidth': 0.05,
-        'num_OFDM': 64,
-        'active_BS': [1],
-        'user_row_first': 1,
-        'user_row_last': 20
-    }
-    
+    # 配置并生成 DeepMIMO 原始数据 (DeepMIMOv3 参数结构)
+    # 场景光线追踪文件不随 pip 包分发，这里用的是 deepmimo.net 上体积最小的场景之一
+    # (ASU Campus 1, ~46MB, 1 个基站), 已下载并解压到 scenarios/asu_campus1
+    parameters = DeepMIMO.default_params()
+    parameters['dataset_folder'] = './scenarios'
+    parameters['scenario'] = 'asu_campus1'
+    parameters['active_BS'] = np.array([1])
+    parameters['user_rows'] = np.arange(1, 21)  # 对应旧版 user_row_first/user_row_last
+    parameters['enable_BS2BS'] = 0  # 该场景只有 1 个基站，没有 BS-BS 光线追踪数据
+
+    parameters['bs_antenna']['shape'] = np.array([64, 1])  # 64天线线性阵列 (ULA)
+    parameters['bs_antenna']['spacing'] = 0.5
+    parameters['ue_antenna']['shape'] = np.array([1, 1])   # 单天线用户
+    parameters['ue_antenna']['spacing'] = 0.5
+
+    parameters['OFDM']['bandwidth'] = 0.05
+    parameters['OFDM']['subcarriers'] = 64
+    parameters['OFDM']['selected_subcarriers'] = np.arange(64)
+
     print("正在生成数据...")
     raw_dataset = DeepMIMO.generate_data(parameters)
     
