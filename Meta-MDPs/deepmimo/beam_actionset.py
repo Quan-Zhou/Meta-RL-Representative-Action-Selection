@@ -659,19 +659,19 @@ if __name__ == "__main__":
     CS_SPARSITY = 3         # assumed number of dominant paths for OMP
     ML_TRAIN_SIZE = distribution_summary["num_draws_used"]  # match our method's data budget exactly
     ML_GRID_BINS = 6        # spatial grid resolution for the learned beam-frequency prior (6x6 = 36 cells)
-    ML_TOP_K = 9            # shortlist size probed after prediction (matched to our ~8.9-probe action set)
-    SEARCH_NUM_EVAL = 2000  # smaller than NUM_EVAL: this loop isn't vectorized (independent noise per probe)
+    ML_TOP_K = 15           # shortlist size probed after prediction (matched to our ~14.5-probe action set)
+    SEARCH_NUM_EVAL = 10000  # this loop isn't vectorized (independent noise per probe), so it's slower than NUM_EVAL
 
     runtime_actionset = actionset_dict_by_m[DISTRIBUTION_PLOT_M]
 
-    train_idx, train_positions, train_beams = draw_training_pairs(
+    _, train_positions, train_beams = draw_training_pairs(
         idx, bs_data, codebook, rng, weights, ML_TRAIN_SIZE
     )
     ml_prior = build_ml_beam_prior(train_positions, train_beams, NUM_BS_ANTENNAS, ML_GRID_BINS)
 
     _, calib_full_reward, _, search_sample_sections, search_sample_idx = evaluate_regret(
         bs_data, idx, section_ids, codebook, runtime_actionset, SEARCH_NUM_EVAL, rng,
-        weights=weights, exclude_idx=train_idx,
+        weights=weights,
     )
     noise_std = calibrate_noise_std(calib_full_reward, SNR_DB)
     print(f"Runtime comparison: SNR={SNR_DB}dB -> noise_std={noise_std:.2e} per I/Q component "
